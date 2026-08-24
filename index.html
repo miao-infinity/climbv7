@@ -178,7 +178,10 @@
 
   /* exercise quick-add */
   .chipgroup{display:flex;flex-wrap:wrap;align-items:center;gap:5px 15px;margin-bottom:7px;}
-  .chipglabel{font-family:var(--mono);text-transform:uppercase;letter-spacing:.08em;font-size:11px;color:var(--muted);width:62px;flex:none;}
+  /* Full-width so a long dimension name (COORDINATION) can never collide with
+     its first chip, which a fixed label column could not guarantee. */
+  .chipglabel{font-family:var(--mono);text-transform:uppercase;letter-spacing:.08em;font-size:11px;
+    color:var(--muted);width:100%;flex:none;margin-bottom:1px;}
   /* Add-panel chips are actions (tap to add), so they read as quiet pills —
      distinct from the borderless text toggles used for styles. */
   .chip.add{border:1px solid var(--line);border-radius:999px;padding:7px 13px;color:var(--dim);}
@@ -198,6 +201,8 @@
   .sethead>span:nth-child(2),.sethead>span:nth-child(4){flex:1;text-align:center;min-width:0;}
   .addbtn{width:100%;display:flex;align-items:center;justify-content:center;gap:7px;padding:14px;font-size:15px;}
   /* endurance entry: 2×2 of labelled metric fields */
+  .cathead{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
+    margin:0 0 10px;padding-bottom:7px;border-bottom:1px solid var(--line);}
   .endugrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:11px;}
   .endufield{display:flex;flex-direction:column;gap:5px;}
   .endulabel{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);white-space:nowrap;}
@@ -349,13 +354,17 @@ var DEFAULT_PLAN={ Mon:'Strength — hangboard + frenchies', Tue:'Rest / mobilit
 /* Word-bounded so "Wrestling" is not mistaken for a rest day. */
 function isRest(f){ return !f || !f.trim() || /\brest\b/i.test(f); }
 
+/* Climbing training dimensions. `key` is stored on each logged exercise and is
+   what the Balance chart's axes are built from, so it must stay stable even
+   when `label` or `items` are edited. */
 var DEFAULT_EX_GROUPS=[
-  { label:'Strength',  items:['Hangboard','Frenchies'] },
-  { label:'Power',     items:['Limit boulders','Campus'] },
-  { label:'Technique', items:['Precision','Tension','Commitment'] },
-  { label:'Support',   items:['Core','Antagonists','Stretch'] },
-  { label:'Weight',    items:['Bench press','Box Jumping','Deadlift'] }
+  { key:'strength',     label:'Strength',     items:['Hangboard','Fingers','Core','Shoulders','Frenchies'] },
+  { key:'movement',     label:'Movement',     items:['Precision','Tension','Commitment'] },
+  { key:'power',        label:'Power',        items:['Campus','Limit boulders'] },
+  { key:'coordination', label:'Coordination', items:['Coordination','Dynos'] },
+  { key:'mobility',     label:'Mobility',     items:['Stretch','Mobility','Antagonists'] }
 ];
+var DIM_KEYS=['strength','movement','power','coordination','mobility'];
 
 /* ---------- icons ---------- */
 var ICONS={
@@ -428,11 +437,45 @@ function normalizePresets(raw){
     if(!g || typeof g!=='object') return null;
     var items=Array.isArray(g.items) ? g.items.filter(function(s){ return typeof s==='string'; })
       .map(function(s){ return s.slice(0,40); }).slice(0,24) : [];
-    return { label:String(g.label||'').slice(0,20), items:items };
+    var label=String(g.label||'').slice(0,20);
+    var key = (typeof g.key==='string' && DIM_KEYS.indexOf(g.key)>=0) ? g.key : null;
+    return { key:key, label:label, items:items };
   }).filter(Boolean);
   return out.length ? out : null;
 }
+
+/* An install from before dimensions existed keeps its old groups in storage and
+   would never see the new ones. Map the old labels across so custom item edits
+   survive, rather than silently replacing what the user renamed. */
+var OLD_GROUP_DIM={ strength:'strength', weight:'strength', technique:'movement',
+  power:'power', support:'mobility', mobility:'mobility', movement:'movement',
+  coordination:'coordination' };
+/* A few names the user placed explicitly; honour those over the old grouping. */
+var ITEM_DIM={ 'core':'strength', 'fingers':'strength', 'shoulders':'strength', 'campus':'power' };
+function migratePresets(raw){
+  if(!raw) return null;
+  var byKey={}, i, g, k;
+  for(i=0;i<raw.length;i++){
+    g=raw[i];
+    k = g.key || OLD_GROUP_DIM[(g.label||'').toLowerCase()] || null;
+    if(!k) continue;                       /* unrecognised group: its items fold in below */
+    if(!byKey[k]) byKey[k]={ key:k, label:'', items:[] };
+    g.items.forEach(function(it){
+      var dest=ITEM_DIM[String(it).trim().toLowerCase()] || k;
+      if(!byKey[dest]) byKey[dest]={ key:dest, label:'', items:[] };
+      if(byKey[dest].items.indexOf(it)<0) byKey[dest].items.push(it);
+    });
+  }
+  return DEFAULT_EX_GROUPS.map(function(d){
+    var got=byKey[d.key];
+    return { key:d.key, label:d.label, items: (got && got.items.length) ? got.items.slice(0,24) : d.items.slice() };
+  });
+}
 var exPresets = normalizePresets(load('crux:expresets', null)) || cloneOf(DEFAULT_EX_GROUPS);
+if(load('crux:presetsver',1) < 2){
+  exPresets = migratePresets(exPresets) || cloneOf(DEFAULT_EX_GROUPS);
+  save('crux:expresets', exPresets); save('crux:presetsver', 2);
+}
 function savePresets(){ save('crux:expresets', exPresets); }
 
 var tab='climb', curDate=todayStr(), range='month';
@@ -909,7 +952,19 @@ function fmtSets(sets){
 /* Endurance — runs mostly, some hikes. Distance and time lead (they drive
    pace, the metric that matters for running); elevation and pack trail for
    the hike/ruck days. */
-var ENDURANCE_TYPES=['Run','Hike','Ruck','Incline','Stairs'];
+/* Each cardio type shows only the fields that matter for it. The stored shape
+   is unchanged (all four stay nullable), so older entries and custom names
+   keep their data — they just fall back to showing every field. */
+var CARDIO_TYPES=[
+  { name:'Run',    fields:['distance','minutes'] },
+  { name:'Hike',   fields:['distance','elevation','minutes'] },
+  { name:'Stairs', fields:['minutes'] }
+];
+function fieldsFor(name){
+  var n=(name||'').toLowerCase(), i;
+  for(i=0;i<CARDIO_TYPES.length;i++) if(CARDIO_TYPES[i].name.toLowerCase()===n) return CARDIO_TYPES[i].fields;
+  return null;                            /* unknown/custom: show everything */
+}
 var ENDU_FIELDS=[
   { key:'distance',  label:'Dist', unit:'km',  max:1000,  int:false },
   { key:'minutes',   label:'Time', unit:'min', max:10000, int:true },
@@ -959,12 +1014,14 @@ function buildTrain(){
   wrap.appendChild(planStrip());
   wrap.appendChild(draftNote());
 
-  function addNamed(nm){
+  /* `dim` is what the Balance chart counts. Chips pass their group's key; the
+     free-text path passes nothing and simply is not charted. */
+  function addNamed(nm, dim){
     nm=(nm||'').trim(); if(!nm) return;
     var prev=lastTimeFor(nm, curDate);
     var sets = prev ? prev.sets.map(function(st){ return { weight:st.weight, reps:st.reps }; }) : [{weight:null,reps:null}];
     if(!sets.length) sets=[{weight:null,reps:null}];
-    editable().exercises.push({ id:newId(), name:nm, sets:sets });
+    editable().exercises.push({ id:newId(), name:nm, sets:sets, dim:(dim||null) });
     addOpen=false; touch(); renderView();
   }
   function addEndurance(nm){
@@ -1000,6 +1057,8 @@ function buildTrain(){
       (exEdit ? null : h('button',{class:'del','aria-label':'Close', onclick:function(){ addOpen=false; renderView(); }}, ic('x',18)))
     ));
 
+    if(!exEdit) card.appendChild(h('div',{class:'cathead'},'Climbing'));
+
     exPresets.forEach(function(g){
       var grp=h('div',{class:'chipgroup'});
       grp.appendChild(h('span',{class:'chipglabel'}, g.label));
@@ -1012,7 +1071,7 @@ function buildTrain(){
               g.items.splice(ni,1); savePresets(); renderView();
             }}, ic('x',14))));
         } else {
-          grp.appendChild(h('button',{class:'chip add', onclick:function(){ addNamed(nm); }}, nm));
+          grp.appendChild(h('button',{class:'chip add', onclick:function(){ addNamed(nm, g.key); }}, nm));
         }
       });
       if(exEdit) grp.appendChild(h('button',{class:'chip add', onclick:function(){
@@ -1022,10 +1081,10 @@ function buildTrain(){
     });
 
     if(!exEdit){
+      card.appendChild(h('div',{class:'cathead', style:{marginTop:'16px'}},'Cardio'));
       var eg=h('div',{class:'chipgroup'});
-      eg.appendChild(h('span',{class:'chipglabel'},'Endurance'));
-      ENDURANCE_TYPES.forEach(function(nm){
-        eg.appendChild(h('button',{class:'chip add', onclick:function(){ addEndurance(nm); }}, nm));
+      CARDIO_TYPES.forEach(function(t){
+        eg.appendChild(h('button',{class:'chip add', onclick:function(){ addEndurance(t.name); }}, t.name));
       });
       card.appendChild(eg);
     }
@@ -1133,7 +1192,15 @@ function enduranceRow(en){
     paceEl.style.display = p ? '' : 'none';
   }
   var grid=h('div',{class:'endugrid'});
-  ENDU_FIELDS.forEach(function(f){
+  /* Only this type's fields. An entry whose value is already set still shows
+     its field even if the type would normally hide it, so nothing logged
+     under an older set of types becomes invisible or uneditable. */
+  var want=fieldsFor(en.name);
+  var shown=ENDU_FIELDS.filter(function(f){
+    return !want || want.indexOf(f.key)>=0 || en[f.key]!=null;
+  });
+  if(shown.length===1) grid.style.gridTemplateColumns='1fr';
+  shown.forEach(function(f){
     var inp=h('input',{class:'setin', type:'number', inputMode:f.int?'numeric':'decimal', placeholder:'—',
       value:(en[f.key]!=null?String(en[f.key]):''), 'aria-label':f.label+' in '+f.unit,
       oninput:function(e){ var x=live(); if(!x) return;
@@ -1163,6 +1230,85 @@ function bucketsFor(r){
   return out;
 }
 function inRange(s, from){ return s.date>=from; }
+
+/* ---------- balance chart ---------- */
+/* Which dimension an exercise belongs to. Entries logged before dimensions
+   existed carry no `dim`, so fall back to matching the name against the
+   current presets; anything unmatched simply is not counted. */
+function dimOf(ex){
+  if(ex.dim && DIM_KEYS.indexOf(ex.dim)>=0) return ex.dim;
+  var n=(ex.name||'').trim().toLowerCase(), i, j;
+  if(!n) return null;
+  for(i=0;i<exPresets.length;i++){
+    for(j=0;j<exPresets[i].items.length;j++){
+      if(String(exPresets[i].items[j]).trim().toLowerCase()===n) return exPresets[i].key;
+    }
+  }
+  return null;
+}
+
+/* Sessions touched, not entries: three finger exercises in one day is one
+   session of strength. */
+function dimCounts(scope){
+  var days={}, i;
+  for(i=0;i<DIM_KEYS.length;i++) days[DIM_KEYS[i]]={};
+  scope.forEach(function(s){
+    (s.exercises||[]).forEach(function(ex){
+      var d=dimOf(ex);
+      if(d) days[d][s.date]=true;
+    });
+  });
+  return DIM_KEYS.map(function(k){
+    var g=null, i2;
+    for(i2=0;i2<exPresets.length;i2++) if(exPresets[i2].key===k) g=exPresets[i2];
+    return { key:k, label:(g?g.label:k), n:Object.keys(days[k]).length };
+  });
+}
+
+function buildBalance(scope){
+  var dims=dimCounts(scope), max=0, i;
+  for(i=0;i<dims.length;i++) if(dims[i].n>max) max=dims[i].n;
+  if(!max) return null;                    /* nothing logged in range — no empty frame */
+
+  var W=316,H=246,CX=158,CY=116,R0=18,R1=78,HALF=30;
+  /* One band per session until 14, then each band stands for several and the
+     subtitle says so — silently rescaling would misstate the count. */
+  var per=Math.ceil(max/14), bands=Math.ceil(max/per);
+  var step=(R1-R0)/bands, gap=(step>4?2.2:1);
+
+  function pol(a,r){ var t=a*Math.PI/180; return [CX+r*Math.cos(t), CY+r*Math.sin(t)]; }
+  function P(p){ return p[0].toFixed(1)+' '+p[1].toFixed(1); }
+  function band(idx,r0,r1){
+    var a0=-90+idx*72-HALF, a1=-90+idx*72+HALF;
+    return 'M '+P(pol(a0,r0))+' L '+P(pol(a0,r1))+
+      ' A '+r1.toFixed(1)+' '+r1.toFixed(1)+' 0 0 1 '+P(pol(a1,r1))+
+      ' L '+P(pol(a1,r0))+
+      ' A '+r0.toFixed(1)+' '+r0.toFixed(1)+' 0 0 0 '+P(pol(a0,r0))+' Z';
+  }
+
+  var svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" role="img" aria-label="Training balance across five climbing dimensions">'+
+    '<title>Training balance</title><desc>'+dims.map(function(d){ return d.label+': '+d.n; }).join(', ')+'</desc>';
+  dims.forEach(function(d,idx){
+    var filled=Math.round(d.n/per), k;
+    for(k=0;k<bands;k++){
+      var r0=R0+k*step, r1=r0+step-gap;
+      svg+='<path d="'+band(idx,r0,r1)+'" fill="'+(k<filled?'#33C39E':'#29241E')+'"'+(k<filled?' opacity="0.85"':'')+'/>';
+    }
+  });
+  dims.forEach(function(d,idx){
+    var q=pol(-90+idx*72, R1+22);
+    var an = idx===0 ? 'middle' : (q[0]>CX+4 ? 'start' : (q[0]<CX-4 ? 'end' : 'middle'));
+    svg+='<text x="'+q[0].toFixed(1)+'" y="'+(q[1]+4).toFixed(1)+'" text-anchor="'+an+'" fill="#7E766B" font-size="11">'+
+      d.label+'<tspan fill="#B7B0A5"> '+d.n+'</tspan></text>';
+  });
+  svg+='</svg>';
+
+  var card=h('div',{class:'chart'});
+  card.appendChild(h('div',{class:'ctitle'},'Balance'));
+  card.appendChild(h('div',{class:'csub'}, per===1 ? 'sessions per dimension' : 'sessions per dimension · one band = '+per));
+  card.appendChild(h('div',{html:svg}));
+  return card;
+}
 
 function buildAnalysis(){
   var wrap=h('div',{class:'wrap'});
@@ -1245,6 +1391,10 @@ function buildAnalysis(){
   });
   hist.appendChild(hrow);
   wrap.appendChild(hist);
+
+  /* balance — stepped rose, one band per session */
+  var bal=buildBalance(scope);
+  if(bal) wrap.appendChild(bal);
 
   /* boulder pyramid */
   var pyr=h('div',{class:'chart'});
@@ -1492,7 +1642,8 @@ function normalizeSession(s){
                reps:(st.reps!=null&&isFinite(r)&&r>=0&&r<=1000)?Math.round(r):null };
     }).filter(Boolean) : [];
     if(!sets.length) sets=[{weight:null,reps:null}];
-    return { id:(typeof e.id==='string'&&e.id)?e.id:newId(), name:String(e.name||'').slice(0,120), sets:sets.slice(0,40) };
+    return { id:(typeof e.id==='string'&&e.id)?e.id:newId(), name:String(e.name||'').slice(0,120), sets:sets.slice(0,40),
+      dim:(typeof e.dim==='string'&&DIM_KEYS.indexOf(e.dim)>=0)?e.dim:null };
   }).filter(Boolean) : [];
   var num=function(v,max){ var n=Number(v); return (v!=null&&isFinite(n)&&n>=0&&n<=max)?n:null; };
   var endurance=Array.isArray(s.endurance) ? s.endurance.map(function(e){
