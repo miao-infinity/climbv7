@@ -203,6 +203,15 @@
   /* endurance entry: 2×2 of labelled metric fields */
   .cathead{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
     margin:0 0 10px;padding-bottom:7px;border-bottom:1px solid var(--line);}
+  /* Rose picker. The focus rule below uses stroke, not outline: the global
+     focus-visible rule does not match SVG paths and outline on SVG shapes is
+     unreliable in Safari. The transparent hit sectors sit on top, so this
+     draws a clean wedge outline. */
+  .rose{margin:0 0 4px;}
+  .rose path[role=button]{cursor:pointer;}
+  .rose path[role=button]:focus-visible{outline:none;stroke:#6aa9e8;stroke-width:2;}
+  .rosechips{display:flex;flex-wrap:wrap;align-items:center;gap:5px 15px;
+    border-top:1px solid var(--line);margin-top:8px;padding-top:11px;}
   .endugrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:11px;}
   .endufield{display:flex;flex-direction:column;gap:5px;}
   .endulabel{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);white-space:nowrap;}
@@ -480,7 +489,7 @@ function savePresets(){ save('crux:expresets', exPresets); }
 
 var tab='climb', curDate=todayStr(), range='month';
 var openSession=null, resetArmed=false, dataMsg=null, planOpen=false;
-var exEdit=false, addOpen=false;
+var exEdit=false, selDim=null;
 /* Styles armed for the next climb you log. You usually work several problems
    of one style in a row, so this carries over — one tap per boulder after the
    first. In memory only, and cleared when the date changes, so a stale style
@@ -647,6 +656,92 @@ function commit(){
    fields call refreshSaveBar() on input, and a re-render there would blur the
    field and drop the caret mid-word. */
 var saveBarEl=null, draftNoteEl=null;
+
+/* The rose picker repaints in place and must never call renderView(): that
+   wipes viewHost, so a wedge tapped while a weight field is focused would
+   destroy the input, drop focus and dismiss the iOS keyboard mid-entry.
+   Same reasoning as planBody and refreshSaveBar. */
+var roseHost=null, roseChips=null, roseOnPick=null;
+function paintRose(){
+  if(!roseHost) return;
+  var dims=dimCounts(trainScope()), max=0, i;
+  for(i=0;i<dims.length;i++) if(dims[i].n>max) max=dims[i].n;
+  roseHost.innerHTML=roseSvg(dims, roseScale(max,5),
+    { viewBox:'0 6 316 202', fontSize:10, selected:selDim, interactive:true });
+  wireRose();
+  if(roseChips){ roseChips.innerHTML=''; appendKid(roseChips, roseChipsFor(selDim)); }
+}
+function wireRose(){
+  var hits=roseHost.querySelectorAll('path[data-hit]'), i;
+  function pick(k){ selDim = (selDim===k ? null : k); paintRose(); }
+  for(i=0;i<hits.length;i++){ (function(p){
+    var k=p.getAttribute('data-hit');
+    p.addEventListener('click', function(){ pick(k); });
+    p.addEventListener('keydown', function(e){
+      if(e.key==='Enter'||e.key===' '){ e.preventDefault(); pick(k); }
+    });
+  })(hits[i]); }
+}
+/* Chips for the selected dimension. Rendered into roseChips so selecting a
+   wedge swaps only this row and nothing above it reflows. */
+function roseChipsFor(key){
+  if(!key) return null;
+  var g=null, i;
+  for(i=0;i<exPresets.length;i++) if(exPresets[i].key===key) g=exPresets[i];
+  if(!g) return null;
+  var row=h('div',{class:'rosechips'});
+  row.appendChild(h('span',{class:'chipglabel'}, g.label));
+  g.items.forEach(function(nm, ni){
+    if(exEdit){
+      var inp=h('input',{class:'inp presetin', value:nm, maxLength:40, 'aria-label':'Rename '+nm,
+        oninput:function(e){ g.items[ni]=e.target.value; savePresets(); }});
+      row.appendChild(h('span',{class:'presetwrap'}, inp,
+        h('button',{class:'del','aria-label':'Delete preset '+nm, onclick:function(){
+          g.items.splice(ni,1); savePresets(); paintRose();
+        }}, ic('x',14))));
+    } else {
+      row.appendChild(h('button',{class:'chip add', onclick:function(){
+        if(roseOnPick) roseOnPick(nm, key);
+      }}, nm));
+    }
+  });
+  if(exEdit){
+    row.appendChild(h('button',{class:'chip add','aria-label':'Add preset', onclick:function(){
+      g.items.push('New exercise'); savePresets(); paintRose();
+    }}, ic('plus',12)));
+    row.appendChild(h('button',{class:'chip add', onclick:function(){
+      exEdit=false; paintRose();
+    }},'Done'));
+    row.appendChild(h('div',{class:'foot', style:{width:'100%',marginTop:'6px'}},
+      h('button',{class:'reset', onclick:function(){
+        exPresets=cloneOf(DEFAULT_EX_GROUPS); savePresets(); paintRose();
+      }}, ic('rotate',13),'Reset presets to default')));
+  } else {
+    row.appendChild(h('button',{class:'chip add','aria-label':'Edit '+g.label+' presets',
+      onclick:function(){ exEdit=true; paintRose(); }},'Edit'));
+  }
+  return row;
+}
+/* The rose counts today's draft too, or tapping a chip would appear to do
+   nothing. dimCounts keys by date into a set, so overlaying a draft on an
+   already-saved day cannot double-count it. */
+function trainScope(){
+  var from=rangeStart('month');
+  var out=sessions.filter(function(s){ return inRange(s,from); });
+  if(drafts[curDate] && curDate>=from) out=out.concat([drafts[curDate]]);
+  return out;
+}
+function buildRosePicker(onPick){
+  roseOnPick=onPick;
+  var box=h('div',{class:'rose'});
+  roseHost=h('div',{});
+  roseChips=h('div',{});
+  box.appendChild(h('div',{class:'csub', style:{margin:'0 2px 2px'}},'sessions · last 30 days'));
+  box.appendChild(roseHost);
+  box.appendChild(roseChips);
+  paintRose();
+  return box;
+}
 function saveBar(){
   saveBarEl = h('div',{class:'savebar'},
     h('span',{class:'msg'}, h('span',{class:'savedot'}), 'UNSAVED'),
@@ -679,7 +774,7 @@ function buildHeader(){
 }
 function tabBtn(id,label,icon){
   return h('button',{ class:'tab'+(tab===id?' active':''),
-    onclick:function(){ tab=id; dataMsg=null; resetArmed=false; exEdit=false; addOpen=false; renderTabs(); renderView(); } },
+    onclick:function(){ tab=id; dataMsg=null; resetArmed=false; exEdit=false; selDim=null; renderTabs(); renderView(); } },
     ic(icon,16), label);
 }
 function renderTabs(){
@@ -1014,89 +1109,52 @@ function buildTrain(){
   wrap.appendChild(planStrip());
   wrap.appendChild(draftNote());
 
-  /* `dim` is what the Balance chart counts. Chips pass their group's key; the
-     free-text path passes nothing and simply is not charted. */
+  /* Rows are appended straight into `list`, so this must exist before the
+     picker is built. An empty div costs nothing. */
+  var list=h('div',{});
+
+  /* Adds append in place and never re-render: a wedge or chip tapped while a
+     weight field is focused must not destroy that input. `toast` confirms the
+     add, since the new row is usually below the fold under the rose. */
   function addNamed(nm, dim){
     nm=(nm||'').trim(); if(!nm) return;
     var prev=lastTimeFor(nm, curDate);
     var sets = prev ? prev.sets.map(function(st){ return { weight:st.weight, reps:st.reps }; }) : [{weight:null,reps:null}];
     if(!sets.length) sets=[{weight:null,reps:null}];
-    editable().exercises.push({ id:newId(), name:nm, sets:sets, dim:(dim||null) });
-    addOpen=false; touch(); renderView();
+    var item={ id:newId(), name:nm, sets:sets, dim:(dim||null) };
+    editable().exercises.push(item);
+    touch();
+    list.appendChild(exerciseRow(item));
+    refreshSaveBar(); paintRose();
+    toast(nm+' added');
   }
   function addEndurance(nm){
     nm=(nm||'').trim(); if(!nm) return;
     var prev=lastEnduranceFor(nm, curDate);
-    editable().endurance.push({ id:newId(), name:nm,
+    var item={ id:newId(), name:nm,
       elevation: prev?prev.elevation:null, minutes: prev?prev.minutes:null,
-      distance: prev?prev.distance:null, pack: prev?prev.pack:null });
-    addOpen=false; touch(); renderView();
+      distance: prev?prev.distance:null, pack: prev?prev.pack:null };
+    editable().endurance.push(item);
+    touch();
+    list.appendChild(enduranceRow(item));
+    refreshSaveBar();
+    toast(nm+' added');
   }
 
-  var loggedEx=(s&&s.exercises)||[], loggedEn=(s&&s.endurance)||[];
+  /* The rose is the picker now, so it leads the page — you choose what to
+     train from what you have been neglecting, then the rows follow. */
+  wrap.appendChild(buildRosePicker(addNamed));
 
-  /* What you did comes first; the preset wall is behind a button so it is not
-     a screenful of chips every time you open the page. */
-  if(loggedEx.length || loggedEn.length){
-    var list=h('div',{});
-    loggedEn.forEach(function(en){ list.appendChild(enduranceRow(en)); });
-    loggedEx.forEach(function(ex){ list.appendChild(exerciseRow(ex)); });
-    wrap.appendChild(list);
-  }
+  var cardio=h('div',{class:'chipgroup', style:{marginTop:'6px'}});
+  cardio.appendChild(h('span',{class:'chipglabel'},'Cardio'));
+  CARDIO_TYPES.forEach(function(t){
+    cardio.appendChild(h('button',{class:'chip add', onclick:function(){ addEndurance(t.name); }}, t.name));
+  });
+  wrap.appendChild(cardio);
 
-  /* The preset list only appears once you ask for it — an empty day is just
-     the Add button, not a wall of chips. */
-  if(!addOpen){
-    wrap.appendChild(h('button',{class:'btn ghost addbtn',
-      onclick:function(){ addOpen=true; renderView(); }}, ic('plus',15),' Add'));
-  } else {
-    var card=h('div',{class:'card'});
-    card.appendChild(h('div',{style:{display:'flex',alignItems:'center',gap:'8px',marginBottom:'12px'}},
-      h('span',{class:'lbl first', style:{margin:'0',flex:'1'}}, exEdit?'Editing presets':'Add'),
-      h('button',{class:'btn ghost sm', onclick:function(){ exEdit=!exEdit; renderView(); }}, exEdit?'Done':'Edit'),
-      (exEdit ? null : h('button',{class:'del','aria-label':'Close', onclick:function(){ addOpen=false; renderView(); }}, ic('x',18)))
-    ));
-
-    if(!exEdit) card.appendChild(h('div',{class:'cathead'},'Climbing'));
-
-    exPresets.forEach(function(g){
-      var grp=h('div',{class:'chipgroup'});
-      grp.appendChild(h('span',{class:'chipglabel'}, g.label));
-      g.items.forEach(function(nm, ni){
-        if(exEdit){
-          var inp=h('input',{class:'inp presetin', value:nm, maxLength:40, 'aria-label':'Rename '+nm,
-            oninput:function(e){ g.items[ni]=e.target.value; savePresets(); }});
-          grp.appendChild(h('span',{class:'presetwrap'}, inp,
-            h('button',{class:'del','aria-label':'Delete preset '+nm, onclick:function(){
-              g.items.splice(ni,1); savePresets(); renderView();
-            }}, ic('x',14))));
-        } else {
-          grp.appendChild(h('button',{class:'chip add', onclick:function(){ addNamed(nm, g.key); }}, nm));
-        }
-      });
-      if(exEdit) grp.appendChild(h('button',{class:'chip add', onclick:function(){
-        g.items.push('New exercise'); savePresets(); renderView();
-      }}, ic('plus',12)));
-      card.appendChild(grp);
-    });
-
-    if(!exEdit){
-      card.appendChild(h('div',{class:'cathead', style:{marginTop:'16px'}},'Cardio'));
-      var eg=h('div',{class:'chipgroup'});
-      CARDIO_TYPES.forEach(function(t){
-        eg.appendChild(h('button',{class:'chip add', onclick:function(){ addEndurance(t.name); }}, t.name));
-      });
-      card.appendChild(eg);
-    }
-
-    if(exEdit){
-      card.appendChild(h('div',{class:'foot', style:{marginTop:'8px'}},
-        h('button',{class:'reset', onclick:function(){
-          exPresets=cloneOf(DEFAULT_EX_GROUPS); savePresets(); renderView();
-        }}, ic('rotate',13),'Reset presets to default')));
-    }
-    wrap.appendChild(card);
-  }
+  ((s&&s.endurance)||[]).forEach(function(en){ list.appendChild(enduranceRow(en)); });
+  ((s&&s.exercises)||[]).forEach(function(ex){ list.appendChild(exerciseRow(ex)); });
+  wrap.appendChild(list);
 
   wrap.appendChild(saveBar());
   return wrap;
@@ -1265,48 +1323,73 @@ function dimCounts(scope){
   });
 }
 
+/* Shared rose geometry. Analysis and Train draw the same figure, so the arc
+   maths lives in one place — two copies of sweep-flag arithmetic is exactly
+   the code that silently drifts apart. */
+var ROSE={ W:316, H:246, CX:158, CY:116, R0:18, R1:78, HALF:30 };
+function rosePol(a,r){ var t=a*Math.PI/180; return [ROSE.CX+r*Math.cos(t), ROSE.CY+r*Math.sin(t)]; }
+function roseP(p){ return p[0].toFixed(1)+' '+p[1].toFixed(1); }
+function roseBand(idx,r0,r1,half){
+  var hw=(half==null?ROSE.HALF:half);
+  var a0=-90+idx*72-hw, a1=-90+idx*72+hw;
+  return 'M '+roseP(rosePol(a0,r0))+' L '+roseP(rosePol(a0,r1))+
+    ' A '+r1.toFixed(1)+' '+r1.toFixed(1)+' 0 0 1 '+roseP(rosePol(a1,r1))+
+    ' L '+roseP(rosePol(a1,r0))+
+    ' A '+r0.toFixed(1)+' '+r0.toFixed(1)+' 0 0 0 '+roseP(rosePol(a0,r0))+' Z';
+}
+/* One band per session until 14, then each band stands for several and the
+   caller says so. max===0 would make per 0 and every later division NaN, so
+   the floor of 1 is load-bearing for the picker, which has no empty guard. */
+function roseScale(max, minBands){
+  var per=Math.max(1, Math.ceil(max/14));
+  return { per:per, bands:Math.max(minBands||1, Math.ceil(max/per)) };
+}
+function roseSvg(dims, sc, o){
+  o=o||{};
+  var step=(ROSE.R1-ROSE.R0)/sc.bands, gap=(step>4?2.2:1), fs=o.fontSize||11;
+  var svg='<svg viewBox="'+(o.viewBox||('0 0 '+ROSE.W+' '+ROSE.H))+'" width="100%"';
+  svg += o.interactive
+    ? ' role="group" aria-label="Training balance — choose a dimension">'
+    : ' role="img" aria-label="Training balance across five climbing dimensions"><title>Training balance</title><desc>'+
+      dims.map(function(d){ return d.label+': '+d.n; }).join(', ')+'</desc>';
+  dims.forEach(function(d,idx){
+    var filled=Math.round(d.n/sc.per), k, on=(o.selected===d.key);
+    for(k=0;k<sc.bands;k++){
+      var r0=ROSE.R0+k*step, r1=r0+step-gap, lit=k<filled;
+      /* The selected wedge lifts: lit bands go full opacity, empty ones warm
+         up, so the choice is visible on the rose and not only in the chips. */
+      svg+='<path d="'+roseBand(idx,r0,r1)+'" data-dim="'+d.key+'" data-fill="'+(lit?'on':'off')+'"'+
+        ' fill="'+(lit?'#33C39E':(on?'#3A332B':'#29241E'))+'"'+
+        (lit?' opacity="'+(on?1:0.85)+'"':'')+'/>';
+    }
+  });
+  dims.forEach(function(d,idx){
+    var q=rosePol(-90+idx*72, ROSE.R1+22);
+    var an = idx===0 ? 'middle' : (q[0]>ROSE.CX+4 ? 'start' : (q[0]<ROSE.CX-4 ? 'end' : 'middle'));
+    svg+='<text x="'+q[0].toFixed(1)+'" y="'+(q[1]+4).toFixed(1)+'" text-anchor="'+an+'" fill="#7E766B" font-size="'+fs+'">'+
+      d.label+'<tspan fill="#B7B0A5"> '+d.n+'</tspan></text>';
+  });
+  /* Hit sectors last so they sit on top, and full-width so the gaps between
+     wedges are not dead zones. */
+  if(o.interactive){
+    dims.forEach(function(d,idx){
+      svg+='<path d="'+roseBand(idx,0,ROSE.R1+14,36)+'" fill="transparent" data-hit="'+d.key+'"'+
+        ' role="button" tabindex="0" aria-pressed="'+(o.selected===d.key?'true':'false')+'"'+
+        ' aria-label="'+d.label+' — '+d.n+' session'+(d.n===1?'':'s')+' in the last 30 days"/>';
+    });
+  }
+  return svg+'</svg>';
+}
+
 function buildBalance(scope){
   var dims=dimCounts(scope), max=0, i;
   for(i=0;i<dims.length;i++) if(dims[i].n>max) max=dims[i].n;
   if(!max) return null;                    /* nothing logged in range — no empty frame */
-
-  var W=316,H=246,CX=158,CY=116,R0=18,R1=78,HALF=30;
-  /* One band per session until 14, then each band stands for several and the
-     subtitle says so — silently rescaling would misstate the count. */
-  var per=Math.ceil(max/14), bands=Math.ceil(max/per);
-  var step=(R1-R0)/bands, gap=(step>4?2.2:1);
-
-  function pol(a,r){ var t=a*Math.PI/180; return [CX+r*Math.cos(t), CY+r*Math.sin(t)]; }
-  function P(p){ return p[0].toFixed(1)+' '+p[1].toFixed(1); }
-  function band(idx,r0,r1){
-    var a0=-90+idx*72-HALF, a1=-90+idx*72+HALF;
-    return 'M '+P(pol(a0,r0))+' L '+P(pol(a0,r1))+
-      ' A '+r1.toFixed(1)+' '+r1.toFixed(1)+' 0 0 1 '+P(pol(a1,r1))+
-      ' L '+P(pol(a1,r0))+
-      ' A '+r0.toFixed(1)+' '+r0.toFixed(1)+' 0 0 0 '+P(pol(a0,r0))+' Z';
-  }
-
-  var svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" role="img" aria-label="Training balance across five climbing dimensions">'+
-    '<title>Training balance</title><desc>'+dims.map(function(d){ return d.label+': '+d.n; }).join(', ')+'</desc>';
-  dims.forEach(function(d,idx){
-    var filled=Math.round(d.n/per), k;
-    for(k=0;k<bands;k++){
-      var r0=R0+k*step, r1=r0+step-gap;
-      svg+='<path d="'+band(idx,r0,r1)+'" fill="'+(k<filled?'#33C39E':'#29241E')+'"'+(k<filled?' opacity="0.85"':'')+'/>';
-    }
-  });
-  dims.forEach(function(d,idx){
-    var q=pol(-90+idx*72, R1+22);
-    var an = idx===0 ? 'middle' : (q[0]>CX+4 ? 'start' : (q[0]<CX-4 ? 'end' : 'middle'));
-    svg+='<text x="'+q[0].toFixed(1)+'" y="'+(q[1]+4).toFixed(1)+'" text-anchor="'+an+'" fill="#7E766B" font-size="11">'+
-      d.label+'<tspan fill="#B7B0A5"> '+d.n+'</tspan></text>';
-  });
-  svg+='</svg>';
-
+  var sc=roseScale(max,1);
   var card=h('div',{class:'chart'});
   card.appendChild(h('div',{class:'ctitle'},'Balance'));
-  card.appendChild(h('div',{class:'csub'}, per===1 ? 'sessions per dimension' : 'sessions per dimension · one band = '+per));
-  card.appendChild(h('div',{html:svg}));
+  card.appendChild(h('div',{class:'csub'}, sc.per===1 ? 'sessions per dimension' : 'sessions per dimension · one band = '+sc.per));
+  card.appendChild(h('div',{html:roseSvg(dims, sc, {})}));
   return card;
 }
 
