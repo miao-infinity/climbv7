@@ -1,5 +1,5 @@
 /* cookie — offline service worker */
-var CACHE = 'cookie-v10';
+var CACHE = 'cookie-v11';
 var ASSETS = [
   './',
   './index.html',

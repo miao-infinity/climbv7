@@ -215,7 +215,9 @@
      focus-visible rule does not match SVG paths and outline on SVG shapes is
      unreliable in Safari. The transparent hit sectors sit on top, so this
      draws a clean wedge outline. */
-  .rose{margin:0 0 4px;}
+  /* The picker rides in a .chart shell so Train reads like Climb and Analysis
+     — same panel, border, radius. .rose only scopes the SVG rules below. */
+  .rose{margin:0;}
   .rose path[role=button]{cursor:pointer;}
   .rose path[role=button]:focus-visible{outline:none;stroke:#6aa9e8;stroke-width:2;}
   .rosechips{display:flex;flex-wrap:wrap;align-items:center;gap:5px 15px;
@@ -774,7 +776,7 @@ function trainScope(){
 }
 function buildRosePicker(onPick, onCardio){
   roseOnPick=onPick; roseOnCardio=onCardio;
-  var box=h('div',{class:'rose'});
+  var box=h('div',{class:'chart rose'});
   roseHost=h('div',{});
   roseChips=h('div',{});
   box.appendChild(h('div',{class:'csub', style:{margin:'0 2px 2px'}},'sessions · last 30 days'));
@@ -1572,7 +1574,7 @@ function buildAnalysis(){
 
   /* tag breakdown */
   var tagCount={};
-  scope.forEach(function(s){ (s.boulders||[]).forEach(function(b){ if(b.sent) b.tags.forEach(function(t){ tagCount[t]=(tagCount[t]||0)+1; }); }); });
+  scope.forEach(function(s){ (s.boulders||[]).forEach(function(b){ if(b.sent) (b.tags||[]).forEach(function(t){ tagCount[t]=(tagCount[t]||0)+1; }); }); });
   var tlist=Object.keys(tagCount).sort(function(a,b){ return tagCount[b]-tagCount[a]; });
   if(tlist.length){
     var tc=h('div',{class:'chart'});
