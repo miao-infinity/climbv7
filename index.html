@@ -215,13 +215,21 @@
      focus-visible rule does not match SVG paths and outline on SVG shapes is
      unreliable in Safari. The transparent hit sectors sit on top, so this
      draws a clean wedge outline. */
-  /* The picker rides in a .chart shell so Train reads like Climb and Analysis
-     — same panel, border, radius. .rose only scopes the SVG rules below. */
-  .rose{margin:0;}
+  /* The wheel is a picker, not a panel, so it wears no card — the same role
+     Climb's Boulder/Sport tabs play, and those are unboxed too. It escapes
+     .wrap's 14px to reach the screen edge, because the radial labels eat about
+     half the width as gutter: inside a card the dial renders at half size and
+     reads as a small thing rattling in a big frame. A hairline closes the
+     block, matching the Boulder/Sport underline. */
+  .rosefree{margin:0 -14px 12px;padding:0 14px 13px;border-bottom:1px solid var(--line);}
+  .rosebleed{margin:0 -14px;}
   .rose path[role=button]{cursor:pointer;}
   .rose path[role=button]:focus-visible{outline:none;stroke:#6aa9e8;stroke-width:2;}
-  .rosechips{display:flex;flex-wrap:wrap;align-items:center;gap:5px 15px;
-    border-top:1px solid var(--line);margin-top:8px;padding-top:11px;}
+  .rosechips{display:flex;flex-wrap:wrap;align-items:center;gap:5px 15px;}
+  /* The chips are content, so they take the card the wheel gave up. :not(:empty)
+     keeps an unselected picker from leaving an empty box behind. */
+  .rosecard:not(:empty){background:var(--panel);border:1px solid var(--line);
+    border-radius:14px;padding:12px;margin-bottom:12px;}
   .endugrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:11px;}
   .endufield{display:flex;flex-direction:column;gap:5px;}
   .endulabel{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);white-space:nowrap;}
@@ -776,14 +784,16 @@ function trainScope(){
 }
 function buildRosePicker(onPick, onCardio){
   roseOnPick=onPick; roseOnCardio=onCardio;
-  var box=h('div',{class:'chart rose'});
-  roseHost=h('div',{});
-  roseChips=h('div',{});
-  box.appendChild(h('div',{class:'csub', style:{margin:'0 2px 2px'}},'sessions · last 30 days'));
-  box.appendChild(roseHost);
-  box.appendChild(roseChips);
+  roseHost=h('div',{class:'rosebleed'});
+  roseChips=h('div',{class:'rosecard'});
+  var head=h('div',{class:'rose rosefree'});
+  head.appendChild(h('div',{class:'csub', style:{margin:'0 2px 2px'}},'sessions · last 30 days'));
+  head.appendChild(roseHost);
+  var frag=h('div',{});
+  frag.appendChild(head);
+  frag.appendChild(roseChips);
   paintRose();
-  return box;
+  return frag;
 }
 function saveBar(){
   saveBarEl = h('div',{class:'savebar'},
