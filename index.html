@@ -182,12 +182,20 @@
      its first chip, which a fixed label column could not guarantee. */
   .chipglabel{font-family:var(--mono);text-transform:uppercase;letter-spacing:.08em;font-size:11px;
     color:var(--muted);width:100%;flex:none;margin-bottom:1px;}
+  /* Short labels sit inline with their chips; the full-width default is there
+     for long dimension names like COORDINATION, which would collide. */
+  .chipglabel.inline{width:auto;margin-bottom:0;margin-right:4px;}
   /* Add-panel chips are actions (tap to add), so they read as quiet pills —
      distinct from the borderless text toggles used for styles. */
   .chip.add{border:1px solid var(--line);border-radius:999px;padding:7px 13px;color:var(--dim);}
   .chip.add:hover{color:var(--chalk);border-color:#4b463d;}
-  .presetwrap{display:inline-flex;align-items:center;gap:2px;border:1px solid var(--line);border-radius:999px;padding:1px 3px 1px 10px;background:var(--raise);}
-  .presetin{background:transparent;border:none;padding:4px 0;font-size:16px;font-weight:600;width:100px;min-width:0;}
+  .presetwrap{display:inline-flex;align-items:center;gap:2px;border:1px solid var(--line);
+    border-radius:999px;padding:3px 6px 3px 12px;background:transparent;}
+  /* 16px is the iOS zoom floor and cannot go lower, so the input matches the
+     chips on weight and colour rather than size — bold 16px next to regular
+     13px chips read as a different control entirely. */
+  .presetin{background:transparent;border:none;padding:3px 0;font-size:16px;font-weight:400;
+    color:var(--chalk);width:112px;min-width:0;}
   .presetin:focus{border:none;}
 
   /* exercises */
@@ -661,13 +669,13 @@ var saveBarEl=null, draftNoteEl=null;
    wipes viewHost, so a wedge tapped while a weight field is focused would
    destroy the input, drop focus and dismiss the iOS keyboard mid-entry.
    Same reasoning as planBody and refreshSaveBar. */
-var roseHost=null, roseChips=null, roseOnPick=null;
+var roseHost=null, roseChips=null, roseOnPick=null, roseOnCardio=null;
 function paintRose(){
   if(!roseHost) return;
   var dims=dimCounts(trainScope()), max=0, i;
   for(i=0;i<dims.length;i++) if(dims[i].n>max) max=dims[i].n;
   roseHost.innerHTML=roseSvg(dims, roseScale(max,5),
-    { viewBox:'0 6 316 202', fontSize:10, selected:selDim, interactive:true });
+    { fontSize:10, selected:selDim, interactive:true });
   wireRose();
   if(roseChips){ roseChips.innerHTML=''; appendKid(roseChips, roseChipsFor(selDim)); }
 }
@@ -686,6 +694,39 @@ function wireRose(){
    wedge swaps only this row and nothing above it reflows. */
 function roseChipsFor(key){
   if(!key) return null;
+  if(key==='cardio'){
+    var crow=h('div',{class:'rosechips'});
+    crow.appendChild(h('span',{class:'chipglabel'},'Cardio'));
+    CARDIO_TYPES.forEach(function(t, ci){
+      if(exEdit){
+        var cin=h('input',{class:'inp presetin', value:t.name, maxLength:40, 'aria-label':'Rename '+t.name,
+          oninput:function(e){ t.name=e.target.value; saveCardio(); }});
+        crow.appendChild(h('span',{class:'presetwrap'}, cin,
+          h('button',{class:'del','aria-label':'Delete '+t.name, onclick:function(){
+            CARDIO_TYPES.splice(ci,1); saveCardio(); paintRose();
+          }}, ic('x',14))));
+      } else {
+        crow.appendChild(h('button',{class:'chip add', onclick:function(){
+          if(roseOnCardio) roseOnCardio(t.name);
+        }}, t.name));
+      }
+    });
+    if(exEdit){
+      crow.appendChild(h('button',{class:'chip add','aria-label':'Add cardio type', onclick:function(){
+        CARDIO_TYPES.push({ key:newId(), name:'New activity', fields:['distance','minutes'] });
+        saveCardio(); paintRose();
+      }}, ic('plus',12)));
+      crow.appendChild(h('button',{class:'chip add', onclick:function(){ exEdit=false; paintRose(); }},'Done'));
+      crow.appendChild(h('div',{class:'foot', style:{width:'100%',marginTop:'6px'}},
+        h('button',{class:'reset', onclick:function(){
+          CARDIO_TYPES=cloneOf(DEFAULT_CARDIO); saveCardio(); paintRose();
+        }}, ic('rotate',13),'Reset cardio to default')));
+    } else {
+      crow.appendChild(h('button',{class:'chip add','aria-label':'Edit cardio types',
+        onclick:function(){ exEdit=true; paintRose(); }},'Edit'));
+    }
+    return crow;
+  }
   var g=null, i;
   for(i=0;i<exPresets.length;i++) if(exPresets[i].key===key) g=exPresets[i];
   if(!g) return null;
@@ -731,8 +772,8 @@ function trainScope(){
   if(drafts[curDate] && curDate>=from) out=out.concat([drafts[curDate]]);
   return out;
 }
-function buildRosePicker(onPick){
-  roseOnPick=onPick;
+function buildRosePicker(onPick, onCardio){
+  roseOnPick=onPick; roseOnCardio=onCardio;
   var box=h('div',{class:'rose'});
   roseHost=h('div',{});
   roseChips=h('div',{});
@@ -805,7 +846,7 @@ function dateBar(){
    afterthought behind a picker. */
 function styleRow(kind){
   var row=h('div',{class:'chipgroup', style:{marginBottom:'11px'}});
-  row.appendChild(h('span',{class:'chipglabel'},'STYLE'));
+  row.appendChild(h('span',{class:'chipglabel inline'},'STYLE'));
   tags[kind].forEach(function(t){
     var on=pending[kind].indexOf(t)>=0;
     row.appendChild(h('button',{class:'chip'+(on?' on':''), 'aria-pressed':String(on),
@@ -900,7 +941,6 @@ function buildClimb(){
 
   if(climbMode==='boulder'){
     var card=h('div',{class:'card'});
-    card.appendChild(h('div',{class:'lbl first'},'Boulders'));
     card.appendChild(styleRow('boulder'));
     var picker=h('div',{class:'grades'});
     V_GRADES.forEach(function(g){
@@ -920,7 +960,6 @@ function buildClimb(){
     wrap.appendChild(card);
   } else {
     var rcard=h('div',{class:'card'});
-    rcard.appendChild(h('div',{class:'lbl first'},'Sport'));
     rcard.appendChild(styleRow('route'));
     var sel=h('select',{class:'inp', style:{maxWidth:'118px'}, 'aria-label':'Route grade'});
     SPORT.forEach(function(lbl,i){ sel.appendChild(h('option',{value:String(i), selected:(i===4)}, lbl)); });
@@ -1050,11 +1089,28 @@ function fmtSets(sets){
 /* Each cardio type shows only the fields that matter for it. The stored shape
    is unchanged (all four stay nullable), so older entries and custom names
    keep their data — they just fall back to showing every field. */
-var CARDIO_TYPES=[
-  { name:'Run',    fields:['distance','minutes'] },
-  { name:'Hike',   fields:['distance','elevation','minutes'] },
-  { name:'Stairs', fields:['minutes'] }
+var DEFAULT_CARDIO=[
+  { key:'run',    name:'Run',    fields:['distance','minutes'] },
+  { key:'hike',   name:'Hike',   fields:['distance','elevation','minutes'] },
+  { key:'stairs', name:'Stairs', fields:['minutes'] }
 ];
+/* Renaming keeps the field set, because fieldsFor matches the live list by its
+   current name — so "Run" renamed to "Jog" still shows distance and time. A
+   type you add yourself gets the common cardio pair. */
+function normalizeCardio(raw){
+  if(!Array.isArray(raw)) return null;
+  var out=raw.map(function(t){
+    if(!t || typeof t!=='object') return null;
+    var nm=String(t.name||'').trim().slice(0,40); if(!nm) return null;
+    var f=Array.isArray(t.fields) ? t.fields.filter(function(k){
+      return ['distance','minutes','elevation','pack'].indexOf(k)>=0; }) : [];
+    return { key:String(t.key||nm.toLowerCase()).slice(0,20), name:nm,
+             fields:(f.length?f:['distance','minutes']) };
+  }).filter(Boolean).slice(0,12);
+  return out.length ? out : null;
+}
+var CARDIO_TYPES = normalizeCardio(load('crux:cardiotypes', null)) || cloneOf(DEFAULT_CARDIO);
+function saveCardio(){ save('crux:cardiotypes', CARDIO_TYPES); }
 function fieldsFor(name){
   var n=(name||'').toLowerCase(), i;
   for(i=0;i<CARDIO_TYPES.length;i++) if(CARDIO_TYPES[i].name.toLowerCase()===n) return CARDIO_TYPES[i].fields;
@@ -1137,20 +1193,13 @@ function buildTrain(){
     editable().endurance.push(item);
     touch();
     list.appendChild(enduranceRow(item));
-    refreshSaveBar();
+    refreshSaveBar(); paintRose();      /* cardio is a wedge too — keep it in sync */
     toast(nm+' added');
   }
 
   /* The rose is the picker now, so it leads the page — you choose what to
      train from what you have been neglecting, then the rows follow. */
-  wrap.appendChild(buildRosePicker(addNamed));
-
-  var cardio=h('div',{class:'chipgroup', style:{marginTop:'6px'}});
-  cardio.appendChild(h('span',{class:'chipglabel'},'Cardio'));
-  CARDIO_TYPES.forEach(function(t){
-    cardio.appendChild(h('button',{class:'chip add', onclick:function(){ addEndurance(t.name); }}, t.name));
-  });
-  wrap.appendChild(cardio);
+  wrap.appendChild(buildRosePicker(addNamed, addEndurance));
 
   ((s&&s.endurance)||[]).forEach(function(en){ list.appendChild(enduranceRow(en)); });
   ((s&&s.exercises)||[]).forEach(function(ex){ list.appendChild(exerciseRow(ex)); });
@@ -1316,22 +1365,31 @@ function dimCounts(scope){
       if(d) days[d][s.date]=true;
     });
   });
-  return DIM_KEYS.map(function(k){
+  var out=DIM_KEYS.map(function(k){
     var g=null, i2;
     for(i2=0;i2<exPresets.length;i2++) if(exPresets[i2].key===k) g=exPresets[i2];
     return { key:k, label:(g?g.label:k), n:Object.keys(days[k]).length };
   });
+  /* Cardio is a sixth axis but not a sixth `dim`: it lives in session.endurance,
+     never on an exercise, so it stays out of DIM_KEYS and out of import
+     validation. It is counted the same way — distinct days. */
+  var cd={};
+  scope.forEach(function(s){ if((s.endurance||[]).length) cd[s.date]=true; });
+  out.push({ key:'cardio', label:'Cardio', n:Object.keys(cd).length });
+  return out;
 }
 
 /* Shared rose geometry. Analysis and Train draw the same figure, so the arc
    maths lives in one place — two copies of sweep-flag arithmetic is exactly
    the code that silently drifts apart. */
-var ROSE={ W:316, H:246, CX:158, CY:116, R0:18, R1:78, HALF:30 };
+var ROSE={ W:316, H:246, CX:158, CY:116, R0:18, R1:78 };
 function rosePol(a,r){ var t=a*Math.PI/180; return [ROSE.CX+r*Math.cos(t), ROSE.CY+r*Math.sin(t)]; }
 function roseP(p){ return p[0].toFixed(1)+' '+p[1].toFixed(1); }
-function roseBand(idx,r0,r1,half){
-  var hw=(half==null?ROSE.HALF:half);
-  var a0=-90+idx*72-hw, a1=-90+idx*72+hw;
+/* Angles derive from the axis count so the figure works for five or six. */
+function roseStep(n){ return 360/n; }
+function roseBand(idx,r0,r1,half,n){
+  var st=roseStep(n||5), hw=(half==null?st*0.42:half);
+  var a0=-90+idx*st-hw, a1=-90+idx*st+hw;
   return 'M '+roseP(rosePol(a0,r0))+' L '+roseP(rosePol(a0,r1))+
     ' A '+r1.toFixed(1)+' '+r1.toFixed(1)+' 0 0 1 '+roseP(rosePol(a1,r1))+
     ' L '+roseP(rosePol(a1,r0))+
@@ -1347,7 +1405,17 @@ function roseScale(max, minBands){
 function roseSvg(dims, sc, o){
   o=o||{};
   var step=(ROSE.R1-ROSE.R0)/sc.bands, gap=(step>4?2.2:1), fs=o.fontSize||11;
-  var svg='<svg viewBox="'+(o.viewBox||('0 0 '+ROSE.W+' '+ROSE.H))+'" width="100%"';
+  var n=dims.length, st=roseStep(n);
+  /* Crop to the labels rather than a fixed box: with six axes one label sits
+     at the very bottom, and a box tuned for five clipped it clean off. */
+  var top=999, bot=-999, k2;
+  for(k2=0;k2<n;k2++){
+    var ly=ROSE.CY+(ROSE.R1+22)*Math.sin((-90+k2*st)*Math.PI/180);
+    if(ly<top) top=ly; if(ly>bot) bot=ly;
+  }
+  top=Math.max(0, Math.floor(top-fs-2)); bot=Math.ceil(bot+fs);
+  var vb=o.viewBox || ('0 '+top+' '+ROSE.W+' '+(bot-top));
+  var svg='<svg viewBox="'+vb+'" width="100%"';
   svg += o.interactive
     ? ' role="group" aria-label="Training balance — choose a dimension">'
     : ' role="img" aria-label="Training balance across five climbing dimensions"><title>Training balance</title><desc>'+
@@ -1358,13 +1426,13 @@ function roseSvg(dims, sc, o){
       var r0=ROSE.R0+k*step, r1=r0+step-gap, lit=k<filled;
       /* The selected wedge lifts: lit bands go full opacity, empty ones warm
          up, so the choice is visible on the rose and not only in the chips. */
-      svg+='<path d="'+roseBand(idx,r0,r1)+'" data-dim="'+d.key+'" data-fill="'+(lit?'on':'off')+'"'+
+      svg+='<path d="'+roseBand(idx,r0,r1,null,n)+'" data-dim="'+d.key+'" data-fill="'+(lit?'on':'off')+'"'+
         ' fill="'+(lit?'#33C39E':(on?'#3A332B':'#29241E'))+'"'+
         (lit?' opacity="'+(on?1:0.85)+'"':'')+'/>';
     }
   });
   dims.forEach(function(d,idx){
-    var q=rosePol(-90+idx*72, ROSE.R1+22);
+    var q=rosePol(-90+idx*st, ROSE.R1+22);
     var an = idx===0 ? 'middle' : (q[0]>ROSE.CX+4 ? 'start' : (q[0]<ROSE.CX-4 ? 'end' : 'middle'));
     svg+='<text x="'+q[0].toFixed(1)+'" y="'+(q[1]+4).toFixed(1)+'" text-anchor="'+an+'" fill="#7E766B" font-size="'+fs+'">'+
       d.label+'<tspan fill="#B7B0A5"> '+d.n+'</tspan></text>';
@@ -1373,7 +1441,7 @@ function roseSvg(dims, sc, o){
      wedges are not dead zones. */
   if(o.interactive){
     dims.forEach(function(d,idx){
-      svg+='<path d="'+roseBand(idx,0,ROSE.R1+14,36)+'" fill="transparent" data-hit="'+d.key+'"'+
+      svg+='<path d="'+roseBand(idx,0,ROSE.R1+14,st/2,n)+'" fill="transparent" data-hit="'+d.key+'"'+
         ' role="button" tabindex="0" aria-pressed="'+(o.selected===d.key?'true':'false')+'"'+
         ' aria-label="'+d.label+' — '+d.n+' session'+(d.n===1?'':'s')+' in the last 30 days"/>';
     });
@@ -1381,17 +1449,6 @@ function roseSvg(dims, sc, o){
   return svg+'</svg>';
 }
 
-function buildBalance(scope){
-  var dims=dimCounts(scope), max=0, i;
-  for(i=0;i<dims.length;i++) if(dims[i].n>max) max=dims[i].n;
-  if(!max) return null;                    /* nothing logged in range — no empty frame */
-  var sc=roseScale(max,1);
-  var card=h('div',{class:'chart'});
-  card.appendChild(h('div',{class:'ctitle'},'Balance'));
-  card.appendChild(h('div',{class:'csub'}, sc.per===1 ? 'sessions per dimension' : 'sessions per dimension · one band = '+sc.per));
-  card.appendChild(h('div',{html:roseSvg(dims, sc, {})}));
-  return card;
-}
 
 function buildAnalysis(){
   var wrap=h('div',{class:'wrap'});
@@ -1431,15 +1488,14 @@ function buildAnalysis(){
   });
   var sendRate = bTries ? Math.round(bSent/bTries*100) : null;
 
+  /* Four tiles, not eight. Route figures moved into the routes block, which
+     only renders when there are routes; lifting volume moved onto the card
+     that already reports lifting. */
   var stats=h('div',{class:'stats'},
     stat(String(scope.length),'Sessions'),
     stat(hardB!=null?'V'+hardB:'—','Hardest', hardB!=null?vColor(hardB):null),
     stat(String(bSent),'Sends'),
-    stat(sendRate!=null?sendRate+'%':'—','Send rate'),
-    stat(String(rSent),'Routes'),
-    stat(hardR!=null?SPORT[hardR]:'—','Hardest rt', hardR!=null?rColor(hardR):null),
-    stat(volume?(volume>=1000?(volume/1000).toFixed(1)+'k':String(Math.round(volume))):'—','Load'),
-    stat(String(setCount),'Sets')
+    stat(sendRate!=null?sendRate+'%':'—','Send rate')
   );
   wrap.appendChild(stats);
 
@@ -1475,10 +1531,6 @@ function buildAnalysis(){
   hist.appendChild(hrow);
   wrap.appendChild(hist);
 
-  /* balance — stepped rose, one band per session */
-  var bal=buildBalance(scope);
-  if(bal) wrap.appendChild(bal);
-
   /* boulder pyramid */
   var pyr=h('div',{class:'chart'});
   pyr.appendChild(h('div',{class:'ctitle'},'Boulder pyramid'));
@@ -1501,21 +1553,21 @@ function buildAnalysis(){
   }
   wrap.appendChild(pyr);
 
-  /* routes */
+  /* Routes live in the pyramid card rather than their own: as a boulderer you
+     usually have none, and a bar chart of a single route drew a full-width bar
+     that said nothing except that the route existed. */
   var rlist=Object.keys(byRouteGrade).map(Number).sort(function(a,b){return b-a;});
   if(rlist.length){
-    var rp=h('div',{class:'chart'});
-    rp.appendChild(h('div',{class:'ctitle'},'Routes sent'));
-    rp.appendChild(h('div',{class:'csub'},'by grade'));
+    pyr.appendChild(h('div',{class:'csub', style:{margin:'16px 2px 10px'}},
+      'routes · '+rSent+' sent'+(hardR!=null?' · hardest '+SPORT[hardR]:'')));
     var rmx=1; rlist.forEach(function(g){ rmx=Math.max(rmx, byRouteGrade[g]); });
     rlist.forEach(function(g){
-      rp.appendChild(h('div',{class:'pyrow'},
+      pyr.appendChild(h('div',{class:'pyrow'},
         h('span',{class:'pyg', style:{color:rColor(g)}}, SPORT[g]),
         h('div',{class:'pytrack'}, h('div',{class:'pybar', style:{width:(byRouteGrade[g]/rmx*100)+'%', background:rColor(g)}})),
         h('span',{class:'pyc'}, String(byRouteGrade[g]))
       ));
     });
-    wrap.appendChild(rp);
   }
 
   /* tag breakdown */
@@ -1530,7 +1582,7 @@ function buildAnalysis(){
     tlist.forEach(function(t){
       tc.appendChild(h('div',{class:'pyrow'},
         h('span',{class:'pyg', style:{width:'62px',color:'var(--dim)',fontSize:'13px'}}, t),
-        h('div',{class:'pytrack'}, h('div',{class:'pybar', style:{width:(tagCount[t]/tmx*100)+'%', background:'#8A7DE0'}})),
+        h('div',{class:'pytrack'}, h('div',{class:'pybar', style:{width:(tagCount[t]/tmx*100)+'%', background:'#7E766B'}})),
         h('span',{class:'pyc'}, String(tagCount[t]))
       ));
     });
@@ -1587,7 +1639,8 @@ function buildAnalysis(){
   if(bn.length){
     var ec=h('div',{class:'chart'});
     ec.appendChild(h('div',{class:'ctitle'},'Heaviest set'));
-    ec.appendChild(h('div',{class:'csub'},'per exercise, in this range'));
+    ec.appendChild(h('div',{class:'csub'},'per exercise · '+setCount+' set'+(setCount===1?'':'s')+
+      (volume ? ' · '+(volume>=1000?(volume/1000).toFixed(1)+'k':String(Math.round(volume)))+' total load' : '')));
     bn.forEach(function(nm){
       ec.appendChild(h('div',{class:'sline', style:{justifyContent:'space-between'}},
         h('span',{style:{color:'var(--chalk)'}}, nm),
